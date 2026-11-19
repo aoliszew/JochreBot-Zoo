@@ -20,6 +20,13 @@ tool that makes the checking trivial.
 
 Nothing leaves your computer.
 
+Also built in:
+
+- **Automatic cropping.** Blank margins are trimmed from view; you see only the part of the scan with text.
+- **Back and Next** step through every doubtful word, including ones you already settled.
+- **Undo** (button, or Cmd/Ctrl+Z) takes back your last decision, and the one before.
+- **Change your mind.** Click any word, even a settled one, to retype it or put it back as unsettled.
+
 ## Why it matters
 
 - **A custom tool, not a general one.** Chat tools can do almost anything, so the method
@@ -50,6 +57,8 @@ Then open http://localhost:8765 and click "Try the 1933 sample".
 
 ## Ideas for next steps
 
+- **Periodicals are the real target.** Newspapers have many columns, and the tool does not split columns yet:
+  crop to one column or one notice first. Column detection is the most important next step.
 - A shared queue of pages, so several people can check at once.
 - Use a dictionary as well as the confidence score to decide what to flag.
 - Ask a language model to suggest a fix for each doubtful word, for the person to accept or reject.

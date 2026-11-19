@@ -17,8 +17,8 @@
   #drop { border: 3px dashed #C9CED3; margin: 30px auto; padding: 50px; max-width: 700px; text-align: center; font-size: 22px; color: #5B6770; }
   #drop.over { border-color: #A4262C; color: #A4262C; }
   #main { display: none; grid-template-columns: 1fr 1fr; gap: 20px; padding: 16px 24px; }
-  #imgwrap { position: relative; align-self: start; border: 1px solid #C9CED3; }
-  #imgwrap img { width: 100%; display: block; }
+  #imgwrap { position: relative; align-self: start; border: 1px solid #C9CED3; overflow: hidden; }
+  #imgwrap img { position: absolute; display: block; max-width: none; }
   .box { position: absolute; border: 2px solid transparent; cursor: pointer; box-sizing: border-box; }
   .box.doubt { border-color: rgba(164,38,44,.85); background: rgba(164,38,44,.12); }
   .box.check { border-color: rgba(178,107,0,.8); background: rgba(178,107,0,.10); }
@@ -46,6 +46,7 @@
   <label>What is this page? <input type="text" id="title" size="34" placeholder="newspaper, date, anything you know"></label>
   <button class="quiet" id="sample">Try the 1933 sample</button>
   <button class="quiet" id="sample2">Try a 1918 book page</button>
+  <button class="quiet" id="undo" disabled>Undo</button>
   <button class="good" id="confirm" disabled>Confirm page → archive</button>
   <span id="archive"></span>
 </div>
@@ -78,7 +79,7 @@ async function load(url, body, headers) {
   try {
     page = await post(url, body, headers);
   } catch (e) { $("msg").textContent = "Could not read the page: " + e.message + " (is Jochre running?)"; return; }
-  words = [];
+  words = []; undoStack.length = 0; $("undo").disabled = true;
   page.lines.forEach((line, li) => line.forEach(w => { w.ocr = w.text; w.line = li; words.push(w); }));
   const sorted = words.map(w => w.conf).sort((a, b) => a - b);
   t1 = Math.min(0.5, sorted[Math.floor(sorted.length / 4)] + 0.0001); t2 = Math.min(0.75, sorted[Math.floor(sorted.length / 2)] + 0.0001);
@@ -87,7 +88,21 @@ async function load(url, body, headers) {
   $("main").style.display = "grid";
   $("img").src = "/image/" + page.image;
   $("confirm").disabled = false;
+  autoCrop();
   render();
+}
+// Automatic cropping: show only the part of the scan that holds text (plus a small margin), not the blank edges.
+let crop = { x: 0, y: 0, w: 1, h: 1 };
+function autoCrop() {
+  const pad = 40;
+  const x0 = Math.max(0, Math.min(...words.map(w => w.x)) - pad), y0 = Math.max(0, Math.min(...words.map(w => w.y)) - pad);
+  const x1 = Math.min(page.width, Math.max(...words.map(w => w.x + w.w)) + pad), y1 = Math.min(page.height, Math.max(...words.map(w => w.y + w.h)) + pad);
+  crop = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  const wrap = $("imgwrap"), img = $("img");
+  wrap.style.aspectRatio = crop.w + " / " + crop.h;
+  img.style.width = (100 * page.width / crop.w) + "%";
+  img.style.left = (-100 * crop.x / crop.w) + "%";
+  img.style.top = (-100 * crop.y / crop.h) + "%";
 }
 function render() {
   const wrap = $("imgwrap");
@@ -98,8 +113,8 @@ function render() {
     const cls = level(w) + (i === sel ? " sel" : "");
     const b = document.createElement("div");
     b.className = "box " + cls;
-    b.style.left = (100 * w.x / page.width) + "%"; b.style.top = (100 * w.y / page.height) + "%";
-    b.style.width = (100 * w.w / page.width) + "%"; b.style.height = (100 * w.h / page.height) + "%";
+    b.style.left = (100 * (w.x - crop.x) / crop.w) + "%"; b.style.top = (100 * (w.y - crop.y) / crop.h) + "%";
+    b.style.width = (100 * w.w / crop.w) + "%"; b.style.height = (100 * w.h / crop.h) + "%";
     b.onclick = () => select(i);
     wrap.appendChild(b);
     if (w.line !== lastLine) { lineDiv = document.createElement("div"); text.appendChild(lineDiv); lastLine = w.line; }
@@ -116,8 +131,10 @@ function select(i) {
   const w = words[i], img = $("img"), pad = 14;
   const ed = $("editor");
   ed.innerHTML = '<canvas id="zoom"></canvas><br><input id="fix" type="text"><span id="roman"></span><br>' +
-    '<button id="ok">Settle it (Enter)</button> <button class="quiet" id="skip">Skip</button> ' +
-    '<span style="color:#5B6770;margin-left:10px">Computer\'s confidence: ' + Math.round(w.conf * 100) + '%</span>';
+    '<button class="quiet" id="back">← Back</button> <button id="ok">Settle it (Enter)</button> <button class="quiet" id="skip">Next →</button> ' +
+    '<span style="color:#5B6770;margin-left:10px">Computer\'s confidence: ' + Math.round(w.conf * 100) + '%</span>' +
+    (w.status ? '<p style="margin:8px 0 0">You ' + (w.status === "fixed" ? 'changed this from <b dir="rtl">' + w.ocr + '</b>' : 'accepted the computer\'s reading') +
+      '. Type over it to change your mind. <button class="quiet" id="restore">Put it back as unsettled</button></p>' : '');
   const c = $("zoom"), sx = Math.max(0, w.x - pad), sy = Math.max(0, w.y - pad);
   const sw = Math.min(page.width - sx, w.w + 2 * pad), sh = Math.min(page.height - sy, w.h + 2 * pad);
   const scale = Math.min(110 / sh, 520 / sw);
@@ -126,13 +143,31 @@ function select(i) {
   c.getContext("2d").drawImage(img, sx * k, sy * k, sw * k, sh * k, 0, 0, c.width, c.height);
   $("fix").value = w.text; $("roman").textContent = w.roman ? "sounds like: " + w.roman : "";
   $("fix").focus(); $("fix").select();
-  $("ok").onclick = settle; $("skip").onclick = () => next(i);
+  $("ok").onclick = settle; $("skip").onclick = () => move(i, 1); $("back").onclick = () => move(i, -1);
+  if ($("restore")) $("restore").onclick = () => { remember(i); w.text = w.ocr; w.status = null; select(i); };
   $("fix").onkeydown = e => { if (e.key === "Enter") settle(); };
+}
+// Every change is remembered, so Undo can take back the last one (and the one before, and so on).
+const undoStack = [];  // not called "history": the browser already uses that name
+function remember(i) { undoStack.push({ i, text: words[i].text, status: words[i].status || null }); $("undo").disabled = false; }
+function undo() {
+  const h = undoStack.pop(); if (!h) return;
+  words[h.i].text = h.text; words[h.i].status = h.status;
+  $("undo").disabled = undoStack.length === 0;
+  select(h.i);
 }
 function settle() {
   const w = words[sel], v = $("fix").value.trim();
+  remember(sel);
   w.status = (v !== w.ocr) ? "fixed" : "confirmed"; w.text = v;
   next(sel);
+}
+// Back and Next step through every doubtful word, settled or not, so you can revisit your own decisions.
+function move(from, dir) {
+  for (let n = 1; n <= words.length; n++) {
+    const j = (from + dir * n + words.length * n) % words.length;
+    if (words[j].conf < t1 || words[j].status) return select(j);
+  }
 }
 function next(from) {
   for (let n = 1; n <= words.length; n++) {
@@ -141,6 +176,11 @@ function next(from) {
   }
   sel = -1; render(); $("editor").innerHTML = "<b>All doubtful words are settled.</b> Confirm the page to send it to the archive.";
 }
+$("undo").onclick = undo;
+document.addEventListener("keydown", e => {
+  // Cmd/Ctrl+Z undoes the last settled word, unless you are in the middle of typing a fix
+  if ((e.metaKey || e.ctrlKey) && e.key === "z" && undoStack.length && (!$("fix") || $("fix").value === words[sel].text)) { e.preventDefault(); undo(); }
+});
 $("confirm").onclick = async () => {
   const lines = page.lines.map(line => line.map(w => ({ text: w.text, ocr: w.ocr, status: w.status || "unreviewed", conf: w.conf, x: w.x, y: w.y, w: w.w, h: w.h })));
   const d = await post("/confirm", JSON.stringify({ id: page.id, image: page.image, checker: $("checker").value, title: $("title").value, lines }),
