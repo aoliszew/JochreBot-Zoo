@@ -27,6 +27,12 @@ Also built in:
 - **Undo** (button, or Cmd/Ctrl+Z) takes back your last decision, and the one before.
 - **Change your mind.** Click any word, even a settled one, to retype it or put it back as unsettled.
 
+For people who work on serial novels in newspapers (the roman-feuilleton):
+
+- **Read just one part of the page.** Drag a box around one column, or around the novel at the foot of the page. Only that part is read.
+- **Novel title and instalment number.** Confirmed instalments with the same title are joined, in order,
+  into one text file in `archive/serials/`. Check instalments in any order; the file sorts itself.
+
 ## Why it matters
 
 - **A custom tool, not a general one.** Chat tools can do almost anything, so the method

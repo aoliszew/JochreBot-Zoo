@@ -37,6 +37,11 @@
   .w.sel { outline: 3px solid #1B1B1F; }
   .legend span { padding: 2px 8px; margin-right: 8px; font-size: 15px; }
   #msg { padding: 0 24px; font-size: 20px; }
+  #imgwrap.picking { cursor: crosshair; touch-action: none; }
+  #imgwrap.picking .box { pointer-events: none; }
+  .rubber { position: absolute; border: 3px dashed #1B1B1F; background: rgba(255,255,255,.3); pointer-events: none; }
+  #serialbar { padding: 8px 24px; background: #E6E6E6; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 17px; }
+  #serialbar input { font-size: 17px; padding: 6px 8px; border: 1px solid #C9CED3; }
 </style>
 </head>
 <body>
@@ -50,10 +55,17 @@
   <button class="good" id="confirm" disabled>Confirm page → archive</button>
   <span id="archive"></span>
 </div>
+<div id="serialbar">
+  <b>Part of a serial novel?</b>
+  <label>Novel title <input type="text" id="serial" size="26" placeholder="same spelling every time"></label>
+  <label>Instalment no. <input type="text" id="part" size="5"></label>
+  <button class="quiet" id="region" disabled>Read just one part of the page</button>
+  <span style="color:#5B6770">Instalments with the same title are joined, in order, into one file.</span>
+</div>
 <div id="drop">Drop a page image here<br><small>or click to choose a file. One column works best.</small><input type="file" id="file" accept="image/*" hidden></div>
 <p id="msg"></p>
 <div id="main">
-  <div id="imgwrap"><img id="img" alt="the page"></div>
+  <div id="imgwrap"><img id="img" alt="the page" draggable="false"></div>
   <div>
     <p id="status"></p>
     <div id="editor"><em>Click a highlighted word, on the page or in the text.</em></div>
@@ -87,7 +99,7 @@ async function load(url, body, headers) {
   $("drop").style.display = "none";
   $("main").style.display = "grid";
   $("img").src = "/image/" + page.image;
-  $("confirm").disabled = false;
+  $("confirm").disabled = false; $("region").disabled = false;
   autoCrop();
   render();
 }
@@ -183,14 +195,43 @@ document.addEventListener("keydown", e => {
 });
 $("confirm").onclick = async () => {
   const lines = page.lines.map(line => line.map(w => ({ text: w.text, ocr: w.ocr, status: w.status || "unreviewed", conf: w.conf, x: w.x, y: w.y, w: w.w, h: w.h })));
-  const d = await post("/confirm", JSON.stringify({ id: page.id, image: page.image, checker: $("checker").value, title: $("title").value, lines }),
+  const d = await post("/confirm", JSON.stringify({ id: page.id, image: page.image, checker: $("checker").value, title: $("title").value, serial: $("serial").value.trim(), part: $("part").value.trim(), lines }),
     { "Content-Type": "application/json" });
-  $("msg").innerHTML = "Saved to the archive as <b>" + d.saved + "</b>. " + d.fixes + " of your fixes were added to the training file.";
+  $("msg").innerHTML = "Saved to the archive as <b>" + d.saved + "</b>. " + d.fixes + " of your fixes were added to the training file." +
+    (d.serial ? " The novel file <b>" + d.serial + "</b> now holds " + d.parts + " instalment(s)." : "");
   count();
 };
 async function count() {
   const d = await (await fetch("/archive-count")).json();
   $("archive").textContent = "Archive: " + d.pages + " pages, " + d.fixes + " fixes kept";
+}
+// Read just one part: drag a box (one column, or the novel strip at the foot of a newspaper page) and only that is read.
+let picking = false, startPt = null, rub = null;
+const wrapEl = $("imgwrap");
+$("region").onclick = () => { picking = true; wrapEl.classList.add("picking"); $("msg").textContent = "Drag a box on the page around the part you want read: one column, or the novel at the foot of the page."; };
+const spot = e => { const r = wrapEl.getBoundingClientRect(); return { x: Math.min(r.width, Math.max(0, e.clientX - r.left)), y: Math.min(r.height, Math.max(0, e.clientY - r.top)), W: r.width, H: r.height }; };
+wrapEl.addEventListener("pointerdown", e => {
+  if (!picking) return;
+  e.preventDefault(); startPt = spot(e);
+  rub = document.createElement("div"); rub.className = "rubber"; wrapEl.appendChild(rub);
+});
+wrapEl.addEventListener("pointermove", e => {
+  if (!picking || !startPt) return;
+  const p = spot(e);
+  rub.style.left = Math.min(p.x, startPt.x) + "px"; rub.style.top = Math.min(p.y, startPt.y) + "px";
+  rub.style.width = Math.abs(p.x - startPt.x) + "px"; rub.style.height = Math.abs(p.y - startPt.y) + "px";
+});
+wrapEl.addEventListener("pointerup", e => {
+  if (!picking || !startPt) return;
+  const p = spot(e), a = startPt; startPt = null; rub.remove(); picking = false; wrapEl.classList.remove("picking");
+  if (Math.abs(p.x - a.x) < 20 || Math.abs(p.y - a.y) < 20) { $("msg").textContent = ""; return; }
+  readRegion(Math.min(p.x, a.x) / p.W, Math.min(p.y, a.y) / p.H, Math.abs(p.x - a.x) / p.W, Math.abs(p.y - a.y) / p.H);
+});
+function readRegion(fx, fy, fw, fh) {  // fractions of the part of the page now on show
+  const img = $("img"), k = img.naturalWidth / page.width, c = document.createElement("canvas");
+  c.width = Math.round(fw * crop.w * k); c.height = Math.round(fh * crop.h * k);
+  c.getContext("2d").drawImage(img, (crop.x + fx * crop.w) * k, (crop.y + fy * crop.h) * k, c.width, c.height, 0, 0, c.width, c.height);
+  c.toBlob(b => load("/ocr", b, { "X-Filename": "region.jpg" }), "image/jpeg", 0.92);
 }
 const drop = $("drop");
 drop.onclick = () => $("file").click();

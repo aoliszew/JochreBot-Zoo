@@ -44,6 +44,28 @@ def run_ocr(image_path):
     return dict(width=int(float(page.get("WIDTH"))), height=int(float(page.get("HEIGHT"))), lines=lines)
 
 
+def join_serial(serial):
+    """Join every confirmed instalment of one serial novel, in instalment order, into a single text file."""
+    def number(d):
+        digits = "".join(ch for ch in str(d.get("part") or "") if ch.isdigit())
+        return int(digits) if digits else 10 ** 9
+    parts = []
+    for f in sorted(ARCHIVE.glob("page-*.json")):
+        d = json.loads(f.read_text())
+        if (d.get("serial") or "").strip() == serial:
+            parts.append(d)
+    parts.sort(key=number)
+    out = ["# " + serial, "# " + str(len(parts)) + " instalment(s) checked so far", ""]
+    for d in parts:
+        out += ["", "## Instalment " + (d.get("part") or "?") + " | " + (d.get("title") or "source not given") + " | checked by " + (d.get("checker") or "anonymous"), ""]
+        out += [" ".join(w["text"] for w in line) for line in d["lines"]]
+    folder = ARCHIVE / "serials"
+    folder.mkdir(exist_ok=True)
+    name = "".join(ch if ch.isalnum() else "-" for ch in serial).strip("-") + ".txt"
+    (folder / name).write_text("\n".join(out) + "\n")
+    return dict(serial="serials/" + name, parts=len(parts))
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -103,7 +125,8 @@ class Handler(BaseHTTPRequestHandler):
                 page_id = Path(d["id"]).name
                 stamp = time.strftime("%Y-%m-%d %H:%M")
                 text = "\n".join(" ".join(w["text"] for w in line) for line in d["lines"])
-                header = "# " + (d.get("title") or "Untitled page") + "\n# Checked by: " + (d.get("checker") or "anonymous") + ", " + stamp + "\n\n"
+                serial, part = (d.get("serial") or "").strip(), (d.get("part") or "").strip()
+                header = "# " + (d.get("title") or "Untitled page") + ("\n# Serial novel: " + serial + ", instalment " + (part or "?") if serial else "") + "\n# Checked by: " + (d.get("checker") or "anonymous") + ", " + stamp + "\n\n"
                 (ARCHIVE / (page_id + ".txt")).write_text(header + text + "\n")
                 (ARCHIVE / (page_id + ".json")).write_text(json.dumps(d, ensure_ascii=False, indent=1))
                 src = WORK / Path(d["image"]).name
@@ -117,7 +140,10 @@ class Handler(BaseHTTPRequestHandler):
                                 fixes += 1
                                 f.write(json.dumps(dict(image=d["image"], box=[w["x"], w["y"], w["w"], w["h"]], ocr=w.get("ocr"),
                                                         human=w["text"], checker=d.get("checker"), time=stamp), ensure_ascii=False) + "\n")
-                return self.send_json(dict(saved=page_id + ".txt", fixes=fixes, folder=str(ARCHIVE)))
+                reply = dict(saved=page_id + ".txt", fixes=fixes, folder=str(ARCHIVE))
+                if serial:
+                    reply.update(join_serial(serial))
+                return self.send_json(reply)
         except Exception as e:  # show the problem in the browser instead of failing silently
             return self.send_json(dict(error=str(e)), 500)
         self.send_response(404)
