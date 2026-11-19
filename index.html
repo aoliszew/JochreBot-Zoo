@@ -45,6 +45,7 @@
   <label>Your name <input type="text" id="checker" size="14"></label>
   <label>What is this page? <input type="text" id="title" size="34" placeholder="newspaper, date, anything you know"></label>
   <button class="quiet" id="sample">Try the 1933 sample</button>
+  <button class="quiet" id="sample2">Try a 1918 book page</button>
   <button class="good" id="confirm" disabled>Confirm page → archive</button>
   <span id="archive"></span>
 </div>
@@ -159,7 +160,23 @@ drop.ondragleave = () => drop.classList.remove("over");
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); if (e.dataTransfer.files[0]) send(e.dataTransfer.files[0]); };
 const send = f => load("/ocr", f, { "X-Filename": encodeURIComponent(f.name) });
 $("sample").onclick = () => load("/sample", "");
+$("sample2").onclick = () => { $("title").value = "Sholem Aleichem, Nakhes fun kinder (1918), p. 34"; load("/sample", "sholem-aleichem-nakhes-fun-kinder-p6.jpg"); };
 count();
+// Demo mode, for making screenshots: ?sample=<file in sample/>&demo=<2..6>&fix=<text>&name=<checker>&title=<title>
+(async () => {
+  const q = new URLSearchParams(location.search);
+  if (!q.get("sample")) return;
+  $("checker").value = q.get("name") || ""; $("title").value = q.get("title") || "";
+  await load("/sample", q.get("sample"));
+  const img = $("img");
+  if (!img.complete) await new Promise(r => { img.onload = r; });
+  const demo = +q.get("demo") || 2;
+  if (demo >= 3) select(words.reduce((best, w, j) => (w.conf < words[best].conf ? j : best), 0));
+  if (demo >= 4) $("fix").value = q.get("fix") || $("fix").value;
+  if (demo >= 5) settle();
+  if (demo >= 6) { $("confirm").click(); await new Promise(r => setTimeout(r, 800)); }
+  document.title = "ready";
+})();
 </script>
 </body>
 </html>

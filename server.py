@@ -65,6 +65,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        self.path = self.path.split("?", 1)[0]  # ignore anything after "?"
         if self.path in ("/", "/index.html"):
             return self.send_file(HERE / "index.html", "text/html; charset=utf-8")
         if self.path.startswith("/image/"):
@@ -85,8 +86,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.path in ("/ocr", "/sample"):
                 page_id = time.strftime("page-%Y%m%d-%H%M%S")
                 if self.path == "/sample":
+                    # the request body may name a file in the sample/ folder; otherwise use the default sample
+                    wanted = HERE / "sample" / Path(body.decode() or SAMPLE.name).name
                     name = page_id + ".jpg"
-                    shutil.copy(SAMPLE, WORK / name)
+                    shutil.copy(wanted if wanted.exists() else SAMPLE, WORK / name)
                 else:
                     ext = ".png" if (self.headers.get("X-Filename") or "").lower().endswith(".png") else ".jpg"
                     name = page_id + ext
