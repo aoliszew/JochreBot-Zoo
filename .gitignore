@@ -1,0 +1,5 @@
+work/
+archive/
+test-run/
+__pycache__/
+.DS_Store

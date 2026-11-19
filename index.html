@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Page Checker</title>
+<style>
+  body { font-family: Calibri, Helvetica, Arial, sans-serif; margin: 0; color: #1B1B1F; background: #fff; font-size: 18px; }
+  header { background: #1B1B1F; color: #fff; padding: 12px 24px; display: flex; align-items: baseline; gap: 20px; }
+  header h1 { font-family: Cambria, Georgia, serif; font-size: 26px; margin: 0; }
+  header span { color: #C9CED3; font-size: 16px; }
+  #bar { padding: 12px 24px; background: #F0F0F0; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  #bar input[type=text] { font-size: 17px; padding: 6px 8px; border: 1px solid #C9CED3; }
+  button { font-size: 17px; padding: 8px 14px; border: 0; background: #A4262C; color: #fff; cursor: pointer; border-radius: 4px; }
+  button.quiet { background: #5B6770; }
+  button.good { background: #2E6B4F; }
+  button:disabled { background: #C9CED3; cursor: default; }
+  #drop { border: 3px dashed #C9CED3; margin: 30px auto; padding: 50px; max-width: 700px; text-align: center; font-size: 22px; color: #5B6770; }
+  #drop.over { border-color: #A4262C; color: #A4262C; }
+  #main { display: none; grid-template-columns: 1fr 1fr; gap: 20px; padding: 16px 24px; }
+  #imgwrap { position: relative; align-self: start; border: 1px solid #C9CED3; }
+  #imgwrap img { width: 100%; display: block; }
+  .box { position: absolute; border: 2px solid transparent; cursor: pointer; box-sizing: border-box; }
+  .box.doubt { border-color: rgba(164,38,44,.85); background: rgba(164,38,44,.12); }
+  .box.check { border-color: rgba(178,107,0,.8); background: rgba(178,107,0,.10); }
+  .box.done { border-color: rgba(46,107,79,.9); background: rgba(46,107,79,.12); }
+  .box.sel { outline: 4px solid #1B1B1F; }
+  #status { font-size: 20px; margin: 0 0 10px; }
+  #editor { background: #F0F0F0; padding: 14px; margin-bottom: 14px; min-height: 150px; }
+  #editor canvas { background: #fff; border: 1px solid #C9CED3; max-width: 100%; }
+  #editor input { font-size: 30px; width: 60%; padding: 6px; direction: rtl; margin: 8px 0; }
+  #roman { color: #5B6770; margin-left: 10px; }
+  #text { direction: rtl; font-size: 24px; line-height: 1.9; }
+  .w { padding: 1px 4px; border-radius: 3px; cursor: pointer; }
+  .w.doubt { background: #F3D4D6; border-bottom: 3px solid #A4262C; }
+  .w.check { background: #F6E6C8; border-bottom: 3px solid #B26B00; }
+  .w.done { background: #D5E8DE; border-bottom: 3px solid #2E6B4F; }
+  .w.sel { outline: 3px solid #1B1B1F; }
+  .legend span { padding: 2px 8px; margin-right: 8px; font-size: 15px; }
+  #msg { padding: 0 24px; font-size: 20px; }
+</style>
+</head>
+<body>
+<header><h1>Page Checker</h1><span>The computer reads the page and shows its doubts. You settle them. Every fix is kept.</span></header>
+<div id="bar">
+  <label>Your name <input type="text" id="checker" size="14"></label>
+  <label>What is this page? <input type="text" id="title" size="34" placeholder="newspaper, date, anything you know"></label>
+  <button class="quiet" id="sample">Try the 1933 sample</button>
+  <button class="good" id="confirm" disabled>Confirm page → archive</button>
+  <span id="archive"></span>
+</div>
+<div id="drop">Drop a page image here<br><small>or click to choose a file. One column works best.</small><input type="file" id="file" accept="image/*" hidden></div>
+<p id="msg"></p>
+<div id="main">
+  <div id="imgwrap"><img id="img" alt="the page"></div>
+  <div>
+    <p id="status"></p>
+    <div id="editor"><em>Click a highlighted word, on the page or in the text.</em></div>
+    <p class="legend"><span class="w doubt">computer is unsure</span><span class="w check">worth a look</span><span class="w done">settled by you</span></p>
+    <div id="text"></div>
+  </div>
+</div>
+<script>
+let page = null, words = [], sel = -1;
+const $ = id => document.getElementById(id);
+// Doubt is relative to the page: the least certain quarter of words is "unsure", the next quarter "worth a look".
+let t1 = 0.5, t2 = 0.75;
+const level = w => w.status ? "done" : (w.conf < t1 ? "doubt" : (w.conf < t2 ? "check" : ""));
+
+async function post(url, body, headers) {
+  const r = await fetch(url, { method: "POST", body, headers });
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  return d;
+}
+async function load(url, body, headers) {
+  $("msg").textContent = "Reading the page…";
+  try {
+    page = await post(url, body, headers);
+  } catch (e) { $("msg").textContent = "Could not read the page: " + e.message + " (is Jochre running?)"; return; }
+  words = [];
+  page.lines.forEach((line, li) => line.forEach(w => { w.ocr = w.text; w.line = li; words.push(w); }));
+  const sorted = words.map(w => w.conf).sort((a, b) => a - b);
+  t1 = Math.min(0.5, sorted[Math.floor(sorted.length / 4)] + 0.0001); t2 = Math.min(0.75, sorted[Math.floor(sorted.length / 2)] + 0.0001);
+  $("msg").textContent = "";
+  $("drop").style.display = "none";
+  $("main").style.display = "grid";
+  $("img").src = "/image/" + page.image;
+  $("confirm").disabled = false;
+  render();
+}
+function render() {
+  const wrap = $("imgwrap");
+  wrap.querySelectorAll(".box").forEach(b => b.remove());
+  const text = $("text"); text.innerHTML = "";
+  let lineDiv = null, lastLine = -1;
+  words.forEach((w, i) => {
+    const cls = level(w) + (i === sel ? " sel" : "");
+    const b = document.createElement("div");
+    b.className = "box " + cls;
+    b.style.left = (100 * w.x / page.width) + "%"; b.style.top = (100 * w.y / page.height) + "%";
+    b.style.width = (100 * w.w / page.width) + "%"; b.style.height = (100 * w.h / page.height) + "%";
+    b.onclick = () => select(i);
+    wrap.appendChild(b);
+    if (w.line !== lastLine) { lineDiv = document.createElement("div"); text.appendChild(lineDiv); lastLine = w.line; }
+    const s = document.createElement("span");
+    s.className = "w " + cls; s.textContent = w.text; s.onclick = () => select(i);
+    lineDiv.appendChild(s); lineDiv.appendChild(document.createTextNode(" "));
+  });
+  const flagged = words.filter(w => w.conf < t1), left = flagged.filter(w => !w.status).length;
+  $("status").innerHTML = "<b>" + words.length + " words</b> read in " + page.seconds + " s. The computer doubts <b>" + flagged.length +
+    "</b> the most. Left to settle: <b>" + left + "</b>.";
+}
+function select(i) {
+  sel = i; render();
+  const w = words[i], img = $("img"), pad = 14;
+  const ed = $("editor");
+  ed.innerHTML = '<canvas id="zoom"></canvas><br><input id="fix" type="text"><span id="roman"></span><br>' +
+    '<button id="ok">Settle it (Enter)</button> <button class="quiet" id="skip">Skip</button> ' +
+    '<span style="color:#5B6770;margin-left:10px">Computer\'s confidence: ' + Math.round(w.conf * 100) + '%</span>';
+  const c = $("zoom"), sx = Math.max(0, w.x - pad), sy = Math.max(0, w.y - pad);
+  const sw = Math.min(page.width - sx, w.w + 2 * pad), sh = Math.min(page.height - sy, w.h + 2 * pad);
+  const scale = Math.min(110 / sh, 520 / sw);
+  c.width = sw * scale; c.height = sh * scale;
+  const k = img.naturalWidth / page.width;
+  c.getContext("2d").drawImage(img, sx * k, sy * k, sw * k, sh * k, 0, 0, c.width, c.height);
+  $("fix").value = w.text; $("roman").textContent = w.roman ? "sounds like: " + w.roman : "";
+  $("fix").focus(); $("fix").select();
+  $("ok").onclick = settle; $("skip").onclick = () => next(i);
+  $("fix").onkeydown = e => { if (e.key === "Enter") settle(); };
+}
+function settle() {
+  const w = words[sel], v = $("fix").value.trim();
+  w.status = (v !== w.ocr) ? "fixed" : "confirmed"; w.text = v;
+  next(sel);
+}
+function next(from) {
+  for (let n = 1; n <= words.length; n++) {
+    const j = (from + n) % words.length;
+    if (!words[j].status && words[j].conf < t1) return select(j);
+  }
+  sel = -1; render(); $("editor").innerHTML = "<b>All doubtful words are settled.</b> Confirm the page to send it to the archive.";
+}
+$("confirm").onclick = async () => {
+  const lines = page.lines.map(line => line.map(w => ({ text: w.text, ocr: w.ocr, status: w.status || "unreviewed", conf: w.conf, x: w.x, y: w.y, w: w.w, h: w.h })));
+  const d = await post("/confirm", JSON.stringify({ id: page.id, image: page.image, checker: $("checker").value, title: $("title").value, lines }),
+    { "Content-Type": "application/json" });
+  $("msg").innerHTML = "Saved to the archive as <b>" + d.saved + "</b>. " + d.fixes + " of your fixes were added to the training file.";
+  count();
+};
+async function count() {
+  const d = await (await fetch("/archive-count")).json();
+  $("archive").textContent = "Archive: " + d.pages + " pages, " + d.fixes + " fixes kept";
+}
+const drop = $("drop");
+drop.onclick = () => $("file").click();
+$("file").onchange = e => e.target.files[0] && send(e.target.files[0]);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); if (e.dataTransfer.files[0]) send(e.dataTransfer.files[0]); };
+const send = f => load("/ocr", f, { "X-Filename": encodeURIComponent(f.name) });
+$("sample").onclick = () => load("/sample", "");
+count();
+</script>
+</body>
+</html>
